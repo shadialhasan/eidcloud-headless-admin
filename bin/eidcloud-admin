@@ -1,0 +1,242 @@
+<?php
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/../src/autoload.php';
+
+use EidCloud\HeadlessAdmin\AdminEngine;
+use EidCloud\HeadlessAdmin\Database\DatabaseGateway;
+use EidCloud\HeadlessAdmin\Metadata\ModuleSchema;
+use EidCloud\HeadlessAdmin\Metadata\SchemaRegistry;
+
+$args = array_slice($argv, 1);
+$command = $args[0] ?? null;
+
+function printHelp(): void
+{
+    echo <<<HELP
+🎛️ EidCloud Headless Admin Engine CLI (Pure PHP 8.2+)
+
+Usage:
+  php bin/eidcloud-admin <command> [options]
+
+Available Commands:
+  serve <schema.json>          Start development server with live API & Micro-Admin UI
+  generate-module --table=NAME Reverse engineer database table into module JSON schema
+  list-tables                  List all tables in connected database
+  validate <schema.json>       Validate schema definition syntax and rules
+  version                      Show version information
+  help, -h, --help             Display this help message
+
+Options for 'serve':
+  --port=PORT                  HTTP port to listen on (default: 8090)
+  --host=HOST                  Host binding (default: 127.0.0.1)
+  --db=DSN                     Database PDO connection DSN (default: sqlite:data.db)
+  --prefix=PATH                API route prefix (default: /api)
+
+Options for 'generate-module':
+  --table=NAME                 Database table name to inspect
+  --db=DSN                     Database PDO connection DSN (default: sqlite:data.db)
+  --out=FILE                   Save output JSON schema to file (optional)
+
+Examples:
+  php bin/eidcloud-admin serve schema.json --port=8090
+  php bin/eidcloud-admin serve schema.json --port=8090 --db="sqlite:app.db"
+  php bin/eidcloud-admin generate-module --table=customers
+  php bin/eidcloud-admin generate-module --table=orders --db="sqlite:ecommerce.db" --out=orders.json
+  php bin/eidcloud-admin validate schema.json
+
+HELP;
+}
+
+if (!$command || in_array($command, ['-h', '--help', 'help'], true)) {
+    printHelp();
+    exit(0);
+}
+
+if ($command === 'version' || in_array($command, ['-v', '--version'], true)) {
+    echo "eidcloud-headless-admin v1.0.0 (PHP " . PHP_VERSION . ")\n";
+    exit(0);
+}
+
+function parseOptions(array $args): array
+{
+    $options = [];
+    foreach ($args as $arg) {
+        if (str_starts_with($arg, '--')) {
+            $parts = explode('=', substr($arg, 2), 2);
+            $key = $parts[0];
+            $val = $parts[1] ?? true;
+            $options[$key] = $val;
+        }
+    }
+    return $options;
+}
+
+$options = parseOptions($args);
+
+if ($command === 'serve') {
+    $schemaFile = $args[1] ?? null;
+    if (!$schemaFile || str_starts_with($schemaFile, '--')) {
+        echo "Error: Schema JSON file required. Example: php bin/eidcloud-admin serve schema.json\n";
+        exit(1);
+    }
+
+    if (!file_exists($schemaFile)) {
+        echo "Error: Schema file not found: {$schemaFile}\n";
+        exit(1);
+    }
+
+    $port = (int) ($options['port'] ?? 8090);
+    $host = (string) ($options['host'] ?? '127.0.0.1');
+    $dbDsn = (string) ($options['db'] ?? 'sqlite:data.db');
+    $prefix = (string) ($options['prefix'] ?? '/api');
+
+    // Create router script in temporary file or run built-in server
+    $routerCode = <<<PHP
+<?php
+require_once '{$_SERVER['DOCUMENT_ROOT']}/src/autoload.php';
+use EidCloud\HeadlessAdmin\AdminEngine;
+use EidCloud\HeadlessAdmin\Metadata\SchemaRegistry;
+
+\$schemaFile = '{$schemaFile}';
+\$registry = SchemaRegistry::fromFile(\$schemaFile);
+\$engine = new AdminEngine(\$registry, '{$dbDsn}', apiPrefix: '{$prefix}');
+
+\$uri = parse_url(\$_SERVER['REQUEST_URI'], PHP_URL_PATH);
+if (file_exists(__DIR__ . \$uri) && !is_dir(__DIR__ . \$uri)) {
+    return false;
+}
+
+\$response = \$engine->handle();
+\$response->send();
+PHP;
+
+    $tmpRouter = sys_get_temp_dir() . '/eidcloud_router_' . md5($schemaFile) . '.php';
+    file_put_contents($tmpRouter, $routerCode);
+
+    echo "🚀 Starting EidCloud Headless Admin Server...\n";
+    echo "📡 Bound to: http://{$host}:{$port}\n";
+    echo "📄 Schema:   {$schemaFile}\n";
+    echo "🗄️ Database: {$dbDsn}\n";
+    echo "🖥️ Admin UI: http://{$host}:{$port}/admin\n";
+    echo "🌐 API Base: http://{$host}:{$port}{$prefix}\n";
+    echo "Press Ctrl+C to stop.\n\n";
+
+    $projectRoot = dirname(__DIR__);
+    passthru(sprintf('php -S %s:%d -t "%s" "%s"', $host, $port, $projectRoot, $tmpRouter));
+    exit(0);
+}
+
+if ($command === 'generate-module') {
+    $table = (string) ($options['table'] ?? '');
+    if (!$table) {
+        echo "Error: Missing required option --table=TABLE_NAME\n";
+        exit(1);
+    }
+
+    $dbDsn = (string) ($options['db'] ?? 'sqlite:data.db');
+    $db = new DatabaseGateway($dbDsn);
+
+    try {
+        $columns = $db->inspectTableColumns($table);
+    } catch (Throwable $e) {
+        echo "Error inspecting table '{$table}': " . $e->getMessage() . "\n";
+        exit(1);
+    }
+
+    if (empty($columns)) {
+        echo "Warning: Table '{$table}' has no columns or does not exist.\n";
+    }
+
+    $fields = [];
+    $pk = 'id';
+
+    foreach ($columns as $name => $col) {
+        $validation = [];
+        if ($col['not_null'] && !$col['primary_key']) {
+            $validation['required'] = true;
+        }
+
+        $fields[$name] = [
+            'type' => $col['type'],
+            'label' => ucfirst(str_replace('_', ' ', $name)),
+            'validation' => $validation,
+            'permissions' => [
+                'read' => ['*'],
+                'write' => ['*'],
+            ],
+            'primary_key' => (bool)$col['primary_key'],
+            'auto_increment' => (bool)$col['primary_key'] && $col['type'] === 'integer',
+            'filterable' => true,
+            'searchable' => in_array($col['type'], ['string', 'text'], true),
+            'sortable' => true,
+        ];
+
+        if ($col['primary_key']) {
+            $pk = $name;
+        }
+    }
+
+    $schema = [
+        'id' => $table,
+        'title' => ucfirst(str_replace('_', ' ', $table)),
+        'table' => $table,
+        'primary_key' => $pk,
+        'permissions' => [
+            'list' => ['*'],
+            'read' => ['*'],
+            'create' => ['*'],
+            'update' => ['*'],
+            'delete' => ['*'],
+            'export' => ['*'],
+        ],
+        'fields' => $fields,
+    ];
+
+    $json = json_encode($schema, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+
+    $outFile = $options['out'] ?? null;
+    if ($outFile) {
+        file_put_contents($outFile, $json);
+        echo "✅ Generated schema saved to: {$outFile}\n";
+    } else {
+        echo $json . "\n";
+    }
+    exit(0);
+}
+
+if ($command === 'list-tables') {
+    $dbDsn = (string) ($options['db'] ?? 'sqlite:data.db');
+    $db = new DatabaseGateway($dbDsn);
+    $tables = $db->listTables();
+    echo "Found " . count($tables) . " table(s):\n";
+    foreach ($tables as $t) {
+        echo " - {$t}\n";
+    }
+    exit(0);
+}
+
+if ($command === 'validate') {
+    $schemaFile = $args[1] ?? null;
+    if (!$schemaFile) {
+        echo "Error: Schema file required. Example: php bin/eidcloud-admin validate schema.json\n";
+        exit(1);
+    }
+    try {
+        $registry = SchemaRegistry::fromFile($schemaFile);
+        $count = count($registry->getModules());
+        echo "✅ Schema is valid! Found {$count} module(s):\n";
+        foreach ($registry->getModules() as $id => $m) {
+            echo " - {$id} ({$m->title}) -> Table: {$m->table}, Fields: " . count($m->fields) . "\n";
+        }
+        exit(0);
+    } catch (Throwable $e) {
+        echo "❌ Schema validation failed: " . $e->getMessage() . "\n";
+        exit(1);
+    }
+}
+
+echo "Unknown command: {$command}\n";
+printHelp();
+exit(1);

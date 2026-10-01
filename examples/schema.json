@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "config": {
+    "app_name": "EidCloud Headless Admin Demo",
+    "version": "1.0.0"
+  },
+  "modules": {
+    "customers": {
+      "id": "customers",
+      "title": "Customer Accounts",
+      "table": "customers",
+      "primary_key": "id",
+      "permissions": {
+        "list": ["*"],
+        "read": ["*"],
+        "create": ["admin", "manager"],
+        "update": ["admin", "manager"],
+        "delete": ["admin"],
+        "export": ["admin"]
+      },
+      "fields": {
+        "id": {
+          "type": "integer",
+          "label": "ID",
+          "primary_key": true,
+          "auto_increment": true
+        },
+        "name": {
+          "type": "string",
+          "label": "Full Name",
+          "validation": {
+            "required": true,
+            "min": 2,
+            "max": 100
+          },
+          "permissions": {
+            "read": ["*"],
+            "write": ["*"]
+          },
+          "searchable": true,
+          "filterable": true
+        },
+        "email": {
+          "type": "string",
+          "label": "Email Address",
+          "validation": {
+            "required": true,
+            "regex": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+            "unique": true
+          },
+          "permissions": {
+            "read": ["*"],
+            "write": ["*"]
+          },
+          "searchable": true,
+          "filterable": true
+        },
+        "status": {
+          "type": "string",
+          "label": "Account Status",
+          "default": "active",
+          "validation": {
+            "required": true,
+            "enum": ["active", "suspended", "pending"]
+          },
+          "permissions": {
+            "read": ["*"],
+            "write": ["admin", "manager"]
+          },
+          "searchable": false,
+          "filterable": true
+        },
+        "credit_balance": {
+          "type": "float",
+          "label": "Credit Balance",
+          "default": 0.0,
+          "validation": {
+            "min": 0
+          },
+          "permissions": {
+            "read": ["admin", "manager"],
+            "write": ["admin"]
+          }
+        },
+        "internal_notes": {
+          "type": "text",
+          "label": "Internal Staff Notes",
+          "permissions": {
+            "read": ["admin"],
+            "write": ["admin"]
+          }
+        }
+      }
+    },
+    "orders": {
+      "id": "orders",
+      "title": "Customer Orders",
+      "table": "orders",
+      "primary_key": "id",
+      "permissions": {
+        "list": ["*"],
+        "read": ["*"],
+        "create": ["admin", "manager"],
+        "update": ["admin", "manager"],
+        "delete": ["admin"]
+      },
+      "fields": {
+        "id": {
+          "type": "integer",
+          "primary_key": true,
+          "auto_increment": true
+        },
+        "order_number": {
+          "type": "string",
+          "validation": {
+            "required": true,
+            "unique": true
+          }
+        },
+        "customer_id": {
+          "type": "integer",
+          "validation": {
+            "required": true
+          },
+          "relation": {
+            "type": "belongs_to",
+            "module": "customers",
+            "field": "id"
+          }
+        },
+        "total_amount": {
+          "type": "float",
+          "validation": {
+            "required": true,
+            "min": 0
+          }
+        },
+        "order_status": {
+          "type": "string",
+          "default": "pending",
+          "validation": {
+            "enum": ["pending", "processing", "shipped", "cancelled"]
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "description": "Metadata-driven headless administration engine generating instant CRUD APIs and RBAC permissions in pure PHP",
+  "topics": [
+    "eidcloud",
+    "headless-admin",
+    "crud-engine",
+    "admin-panel",
+    "rbac",
+    "schema-driven",
+    "php8"
+  ]
+}

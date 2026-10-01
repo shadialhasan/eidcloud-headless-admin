@@ -1,0 +1,30 @@
+{
+    "name": "eidcloud/headless-admin",
+    "description": "Metadata-driven headless administration engine generating instant CRUD APIs and RBAC permissions in pure PHP",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Eng. MHD. Shadi AL-Hasan",
+            "role": "Author & Maintainer"
+        }
+    ],
+    "require": {
+        "php": ">=8.2"
+    },
+    "autoload": {
+        "psr-4": {
+            "EidCloud\\HeadlessAdmin\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "EidCloud\\HeadlessAdmin\\Tests\\": "tests/"
+        }
+    },
+    "bin": [
+        "bin/eidcloud-admin"
+    ],
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
